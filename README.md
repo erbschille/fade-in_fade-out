@@ -3,6 +3,8 @@ Fade In/Fade Out task
 
 This is a mental imagery outcome measure--intended to be given both pre- and post-experiment. It largely replicates the task as described in Luhrmann, Nusbaum & Thisted, 2013 (described on page 165). This is a newly created version, coded in javascript with the assistance of Claude (model Sonnet 4.6 in June 2026).
 
+**Collaborators or those interested in using this task should fork this repo. Please do not use our same link (it will mess with data collection)**
+
 These are the instructions for the Fade In task: 
 
 "Welcome to the Fade In task. During this task, you will be shown a series of blurry images/words. These images/words will become increasingly clear so that eventually you will be able to identify what you are seeing. You will have to indicate at what point you are able to identify the image/word that is being shown. On the following screens, you will view a series of 20 images/words shown one at a time. Once you know what the image/word is, press the spacebar. You will then see a space to enter text. Please type in the image/word that you have just seen. Finally, hit the enter key or click continue to proceed to the next picture."
