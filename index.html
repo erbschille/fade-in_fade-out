@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fade In / Fade Out Visual Task</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Lato:wght@300;400;700&family=Courier+Prime:wght@700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif; background: #f2f2f2; color: #1a1a1a; }
+
+    /* ── Pre-experiment overlay ───────────────────────────── */
+    #pre-experiment {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #f2f2f2;
+      display: flex; justify-content: center; align-items: center;
+    }
+    .pre-card {
+      background: #fff; border-radius: 10px; padding: 52px 60px;
+      max-width: 460px; width: 100%; text-align: center;
+      box-shadow: 0 2px 20px rgba(0,0,0,.10);
+    }
+    .pre-card h2 { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+    .pre-card p  { font-size: 15px; color: #777; margin-bottom: 24px; }
+    .pre-card label { display: block; font-size: 12px; font-weight: 700;
+      letter-spacing: .08em; text-transform: uppercase; color: #888; margin-bottom: 8px; }
+    #pid-input {
+      font-family: 'Lato', sans-serif; font-size: 20px; padding: 10px 16px;
+      width: 200px; text-align: center; border: 2px solid #ddd; border-radius: 7px;
+      outline: none; transition: border-color .2s; letter-spacing: .04em;
+    }
+    #pid-input:focus    { border-color: #3a7bd5; }
+    #pid-input.error    { border-color: #e74c3c; }
+    #start-btn {
+      display: block; width: 200px; margin: 20px auto 0;
+      padding: 12px; font-family: 'Lato', sans-serif; font-size: 16px;
+      font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      background: #3a7bd5; color: #fff; border: none; border-radius: 7px;
+      cursor: pointer; transition: background .2s;
+    }
+    #start-btn:hover { background: #2f67ba; }
+
+    /* ── Main experiment canvas ───────────────────────────── */
+    #main-screen {
+      display: none;
+      min-height: 100vh;
+    }
+
+    /* ── Instructions ─────────────────────────────────────── */
+    .inst {
+      max-width: 660px; margin: 0 auto;
+      padding: 60px 24px; line-height: 1.85; font-size: 16.5px;
+    }
+    .inst h2 { font-size: 22px; font-weight: 700; margin-bottom: 20px; }
+    .inst p  { margin-bottom: 16px; }
+    .inst .start-cue { margin-top: 28px; font-weight: 700; }
+    .break-screen { max-width: 560px; margin: 0 auto; text-align: center; padding: 80px 24px; }
+    .break-screen h2 { font-size: 24px; margin-bottom: 16px; }
+    .break-screen p  { font-size: 16px; color: #555; line-height: 1.7; }
+    kbd {
+      display: inline-block; padding: 2px 9px;
+      font-family: 'Courier Prime', monospace; font-size: 13px;
+      background: #f4f4f4; border: 1px solid #ccc;
+      border-bottom: 2px solid #999; border-radius: 4px; color: #333;
+    }
+
+    /* ── Blur trial ───────────────────────────────────────── */
+    .trial-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 36px 20px 48px; min-height: 100vh; justify-content: center;
+    }
+    .trial-prompt { font-size: 15px; color: #666; margin-bottom: 32px; text-align: center; }
+    .trial-prompt em { font-style: italic; }
+
+    /* stim-clip: overflow:hidden + padding contain the CSS blur bleed         */
+    /* padding must be ≥ the blur radius; at MAX 50 px, blur bleeds ~100 px   */
+    .stim-clip { overflow: hidden; padding: 100px; }
+
+    /* Smooth blur transitions — duration slightly under frame interval so each
+       step flows into the next without a visible snap.                        */
+    #blur-target { transition: filter 450ms linear; display: inline-block; }
+
+    .stim-word {
+      font-family: 'Courier Prime', 'Courier New', monospace;
+      font-size: 76px; font-weight: 700; color: #111;
+      letter-spacing: 6px; white-space: nowrap; user-select: none; display: block;
+    }
+    .stim-img { font-size: 140px; line-height: 1; user-select: none; display: block; }
+    .trial-counter { margin-top: 20px; font-size: 13px; color: #ccc; }
+
+    /* ── Response / rest screens ──────────────────────────── */
+    .resp-wrap, .rest-wrap {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh; padding: 40px 20px; text-align: center;
+    }
+    .resp-wrap h3, .rest-wrap h3 { font-size: 22px; font-weight: 700; margin-bottom: 12px; }
+    .resp-wrap p,  .rest-wrap p  { font-size: 15px; color: #555; line-height: 1.7; }
+    .resp-sub { margin-bottom: 18px !important; }
+    #resp-input {
+      font-family: 'Lato', sans-serif; font-size: 22px; padding: 12px 18px;
+      width: 320px; text-align: center; border: 2px solid #ddd; border-radius: 8px;
+      outline: none; transition: border-color .2s; letter-spacing: .03em; margin-top: 4px;
+    }
+    #resp-input:focus { border-color: #3a7bd5; }
+    #resp-input.shake { border-color: #e74c3c; animation: shake .35s ease; }
+    @keyframes shake {
+      0%,100%  { transform: translateX(0); }
+      20%,60%  { transform: translateX(-7px); }
+      40%,80%  { transform: translateX(7px); }
+    }
+    .btn {
+      margin-top: 20px; padding: 12px 36px;
+      font-family: 'Lato', sans-serif; font-size: 16px; font-weight: 700;
+      letter-spacing: .05em; text-transform: uppercase;
+      background: #3a7bd5; color: #fff; border: none;
+      border-radius: 8px; cursor: pointer; transition: background .2s;
+    }
+    .btn:hover { background: #2f67ba; }
+
+    /* ── Debug overlay ────────────────────────────────────── */
+    #dbg {
+      position: fixed; bottom: 8px; right: 12px;
+      font-family: 'Courier New', monospace; font-size: 11px;
+      color: rgba(0,0,0,.28); pointer-events: none; line-height: 1.6;
+      white-space: pre;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Pre-experiment: participant ID ──────────────────────────── -->
+<div id="pre-experiment">
+  <div class="pre-card">
+    <h2>Fade In / Fade Out Task</h2>
+    <p>Please enter the Participant ID<br>provided by the experimenter.</p>
+    <label for="pid-input">Participant ID</label>
+    <input id="pid-input" type="text" placeholder="e.g. P001" autocomplete="off" spellcheck="false">
+    <button id="start-btn">Begin</button>
+  </div>
+</div>
+
+<!-- ── Experiment renders here ─────────────────────────────────── -->
+<div id="main-screen"></div>
+<div id="dbg"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   1. CONFIGURATION
+   ═══════════════════════════════════════════════════════════════ */
+const CONFIG = {
+  NUM_FRAMES:        41,    // matches Luhrmann et al. (2013)
+  FRAME_DURATION_MS: 500,  // ms per frame — matches paper
+
+  // Maximum Gaussian blur (applied at the blurriest frame).
+  // The blur curve is quadratic (see blurForFrame), so the very first
+  // step already changes by ~MAX/20, making the motion immediately visible.
+  MAX_BLUR_WORD_PX:  40,   // for text word stimuli
+  MAX_BLUR_IMAGE_PX: 50,   // for image / emoji stimuli
+
+  // Set false for real data collection:
+  //   true  → shows frame/blur counter; displays raw data at end
+  //   false → hides counter; auto-downloads CSV
+  DEBUG_MODE: false,
+
+  // Require a non-empty typed response before advancing from fade-in trials
+  REQUIRE_RESPONSE: true,
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   2. STIMULI
+   10 words + 10 image placeholders = 20 total.
+
+   To swap in real images replace content_html with an <img> tag:
+     content_html: `<img src="stimuli/cherries.jpg"
+                         style="max-width:280px;max-height:240px;
+                                display:block;object-fit:contain;">`
+   Then adjust MAX_BLUR_IMAGE_PX to suit the image content.
+   ═══════════════════════════════════════════════════════════════ */
+const IMG = (src, label) =>
+  `<img src="${src}" alt="${label}"
+        style="max-width:320px; max-height:280px; display:block; object-fit:contain;">`;
+
+const IMAGES = {
+  infinity: 'stimuli/infinity.jpg',
+  dove:     'stimuli/dove.jpg',
+  yinyang:  'stimuli/yinyang.jpg',
+  cross:    'stimuli/cross.jpg',
+  moon:     'stimuli/moon.jpg',
+  bike:     'stimuli/bike.jpg',
+  tree:     'stimuli/tree.jpg',
+  house:    'stimuli/house.jpg',
+  chair:    'stimuli/chair.jpg',
+  cherries: 'stimuli/cherries.jpg',
+};
+
+const STIMULI = [
+  // ── words ──────────────────────────────────────────────────────
+  { id:'w01', type:'word',  label:'green',    content_html:`<span class="stim-word">GREEN</span>`    },
+  { id:'w02', type:'word',  label:'school',   content_html:`<span class="stim-word">SCHOOL</span>`   },
+  { id:'w03', type:'word',  label:'window',   content_html:`<span class="stim-word">WINDOW</span>`   },
+  { id:'w04', type:'word',  label:'shoe',     content_html:`<span class="stim-word">SHOE</span>`     },
+  { id:'w05', type:'word',  label:'dog',      content_html:`<span class="stim-word">DOG</span>`      },
+  { id:'w06', type:'word',  label:'spirit',   content_html:`<span class="stim-word">SPIRIT</span>`   },
+  { id:'w07', type:'word',  label:'universe', content_html:`<span class="stim-word">UNIVERSE</span>` },
+  { id:'w08', type:'word',  label:'ancestor', content_html:`<span class="stim-word">ANCESTOR</span>` },
+  { id:'w09', type:'word',  label:'goddess',  content_html:`<span class="stim-word">GODDESS</span>`  },
+  { id:'w10', type:'word',  label:'energy',   content_html:`<span class="stim-word">ENERGY</span>`   },
+  // ── images (loaded from stimuli/ folder) ───────────────────────
+  { id:'i01', type:'image', label:'infinity', content_html: IMG(IMAGES.infinity, 'infinity') },
+  { id:'i02', type:'image', label:'dove',     content_html: IMG(IMAGES.dove,     'dove')     },
+  { id:'i03', type:'image', label:'yinyang',  content_html: IMG(IMAGES.yinyang,  'yinyang')  },
+  { id:'i04', type:'image', label:'cross',    content_html: IMG(IMAGES.cross,    'cross')    },
+  { id:'i05', type:'image', label:'moon',     content_html: IMG(IMAGES.moon,     'moon')     },
+  { id:'i06', type:'image', label:'bike',     content_html: IMG(IMAGES.bike,     'bike')     },
+  { id:'i07', type:'image', label:'tree',     content_html: IMG(IMAGES.tree,     'tree')     },
+  { id:'i08', type:'image', label:'house',    content_html: IMG(IMAGES.house,    'house')    },
+  { id:'i09', type:'image', label:'chair',    content_html: IMG(IMAGES.chair,    'chair')    },
+  { id:'i10', type:'image', label:'cherries', content_html: IMG(IMAGES.cherries, 'cherries') },
+];
+
+
+/* ═══════════════════════════════════════════════════════════════
+   3. UTILITIES
+   ═══════════════════════════════════════════════════════════════ */
+function shuffleArray(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+/**
+ * Compute the CSS blur value (px) for a given display-frame index.
+ *
+ * Blur levels are indexed 0 (clear/identifiable) → 40 (MAX blur).
+ *   Fade-in  display order: frame 0 = MAX blur (blurry) → frame 40 = 0 (clear)
+ *   Fade-out display order: frame 0 = 0 (clear) → frame 40 = MAX blur (blurry)
+ *
+ * A quadratic curve is used rather than linear so that each frame produces
+ * a clearly perceptible change: the first step changes blur by ~MAX/20,
+ * which is well above the human just-noticeable-difference for blur.
+ * (Linear progression at 1 px/step is typically below perception threshold.)
+ */
+function blurForFrame(frame, dir, stimType) {
+  const max  = stimType === 'word' ? CONFIG.MAX_BLUR_WORD_PX : CONFIG.MAX_BLUR_IMAGE_PX;
+  const t    = frame / (CONFIG.NUM_FRAMES - 1);   // 0 → 1 as display frames advance
+  const curve = dir === 'in'
+    ? Math.pow(1 - t, 2)   // fade-in:  1 at frame 0, 0 at frame 40 (concave)
+    : Math.pow(t, 2);       // fade-out: 0 at frame 0, 1 at frame 40 (concave)
+  return max * curve;
+}
+
+/** Clarity 0–100 %: 100 = fully clear, 0 = fully obscured */
+function clarityPct(frame, dir) {
+  const t = frame / (CONFIG.NUM_FRAMES - 1);
+  return dir === 'in' ? t * 100 : (1 - t) * 100;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   4. EXPERIMENT STATE
+   ═══════════════════════════════════════════════════════════════ */
+const allData    = [];   // collects one object per trial
+let participantId = '';
+let sessionStart  = '';
+const main        = document.getElementById('main-screen');
+const dbg         = document.getElementById('dbg');
+
+/* ═══════════════════════════════════════════════════════════════
+   5. BLUR TRIAL
+   ═══════════════════════════════════════════════════════════════ */
+/**
+ * Run one blur-sequence trial.
+ * @param {object}   stimulus
+ * @param {'in'|'out'} direction
+ * @param {string}   taskType   'fade_in' | 'fade_out'
+ * @param {number}   trialNum   1-based index within this task
+ * @param {number}   taskTotal  total trials in this task
+ * @param {function} onComplete called with the trial data object when done
+ */
+function runBlurTrial(stimulus, direction, taskType, trialNum, taskTotal, onComplete) {
+
+  let frame           = 0;
+  let timer           = null;
+  let sequenceStopped = false;
+  const t0            = performance.now();
+
+  const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+  // ── Build the trial DOM once ──────────────────────────────────
+  // The initial blur is set as an inline style on #blur-target so the
+  // element is already blurred on its very first paint — no unblurred flash.
+  const initialBlurPx = blurForFrame(0, direction, stimulus.type);
+
+  const prompt = direction === 'in'
+    ? `Press <kbd>spacebar</kbd> when you can identify the image&thinsp;/&thinsp;word.`
+    : `Press <kbd>spacebar</kbd> when you can <em>no longer</em> identify the image&thinsp;/&thinsp;word.`;
+
+  main.innerHTML = `
+    <div class="trial-wrap">
+      <p class="trial-prompt">${prompt}</p>
+      <div class="stim-clip">
+        <div id="blur-target" style="filter:blur(${initialBlurPx.toFixed(2)}px);">${stimulus.content_html}</div>
+      </div>
+      <p class="trial-counter">Trial ${trialNum} of ${taskTotal}</p>
+    </div>`;
+
+  const blurTarget = document.getElementById('blur-target');
+
+  // ── Update only the CSS filter — no DOM rebuilding ────────────
+  const applyBlur = () => {
+    const px = blurForFrame(frame, direction, stimulus.type);
+    blurTarget.style.filter = `blur(${px.toFixed(2)}px)`;
+    if (CONFIG.DEBUG_MODE) {
+      dbg.textContent =
+        `frame ${frame + 1}/${CONFIG.NUM_FRAMES}  ·  ` +
+        `blur ${px.toFixed(1)} px  ·  clarity ${clarityPct(frame, direction).toFixed(0)} %`;
+    }
+  };
+
+  // ── Collect trial data and call onComplete ────────────────────
+  const completeTrial = (responseText) => {
+    stopTimer();
+    document.removeEventListener('keydown', onSpacebar);
+    if (CONFIG.DEBUG_MODE) dbg.textContent = '';
+
+    onComplete({
+      participant_id:          participantId,
+      session_start:           sessionStart,
+      stimulus_id:             stimulus.id,
+      stimulus_type:           stimulus.type,
+      stimulus_label:          stimulus.label,
+      task_type:               taskType,
+      direction:               direction,
+      trial_num:               trialNum,
+      // ── Primary DVs ──────────────────────────────────────────
+      // clarity_pct_at_response: 100 = fully clear, 0 = fully blurred
+      //   Fade-in : lower → recognised at higher blur → more sensitive/primed
+      //   Fade-out: lower → lost recognition at higher blur → more robust
+      frame_at_response:       frame,
+      clarity_pct_at_response: parseFloat(clarityPct(frame, direction).toFixed(1)),
+      blur_px_at_response:     parseFloat(blurForFrame(frame, direction, stimulus.type).toFixed(2)),
+      // ── Supplementary ────────────────────────────────────────
+      frames_shown:            frame + 1,
+      total_frames:            CONFIG.NUM_FRAMES,
+      saw_all_frames:          frame >= CONFIG.NUM_FRAMES - 1,
+      response_text:           responseText,
+      rt_ms:                   Math.round(performance.now() - t0),
+    });
+  };
+
+  // ── Text-entry screen  (fade-in only) ────────────────────────
+  const showTextEntry = () => {
+    main.innerHTML = `
+      <div class="resp-wrap">
+        <h3>What did you see?</h3>
+        <p class="resp-sub">
+          Please type what you identified below.<br>
+          Then press <kbd>Enter</kbd> or click <strong>Continue</strong>.
+        </p>
+        <input type="text" id="resp-input"
+               placeholder="Type your answer…" autocomplete="off" spellcheck="false">
+        <br>
+        <button class="btn" id="resp-btn">Continue</button>
+      </div>`;
+
+    const inp = document.getElementById('resp-input');
+    const btn = document.getElementById('resp-btn');
+    inp.focus();
+
+    const submit = () => {
+      const txt = inp.value.trim();
+      if (CONFIG.REQUIRE_RESPONSE && txt.length === 0) {
+        inp.classList.add('shake');
+        inp.addEventListener('animationend', () => inp.classList.remove('shake'), { once: true });
+        inp.focus();
+        return;
+      }
+      completeTrial(txt);
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+    btn.addEventListener('click',   submit);
+  };
+
+  // ── Rest screen  (fade-out only) ─────────────────────────────
+  const showRestScreen = () => {
+    main.innerHTML = `
+      <div class="rest-wrap">
+        <h3>Take a moment to rest.</h3>
+        <p>When you are ready, press <kbd>spacebar</kbd><br>or click <strong>Continue</strong>.</p>
+        <button class="btn" id="rest-btn" style="margin-top:28px;">Continue</button>
+      </div>`;
+
+    document.getElementById('rest-btn').addEventListener('click', () => completeTrial(null));
+
+    const onRestSpace = e => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        document.removeEventListener('keydown', onRestSpace);
+        completeTrial(null);
+      }
+    };
+    document.addEventListener('keydown', onRestSpace);
+  };
+
+  // ── Advance frames automatically ──────────────────────────────
+  const advance = () => {
+    if (sequenceStopped) return;
+    if (frame >= CONFIG.NUM_FRAMES - 1) {
+      // All 41 frames exhausted — auto-proceed without spacebar
+      sequenceStopped = true;
+      direction === 'in' ? showTextEntry() : showRestScreen();
+      return;
+    }
+    frame++;
+    applyBlur();
+    timer = setTimeout(advance, CONFIG.FRAME_DURATION_MS);
+  };
+
+  // ── Spacebar: participant response ────────────────────────────
+  const onSpacebar = e => {
+    if (e.code === 'Space' && !sequenceStopped) {
+      e.preventDefault();
+      sequenceStopped = true;
+      stopTimer();
+      direction === 'in' ? showTextEntry() : showRestScreen();
+    }
+  };
+
+  // ── Deferred start ────────────────────────────────────────────
+  // Wrapped in setTimeout(…, 0) so the spacebar that advanced the previous
+  // screen cannot leak into onSpacebar here.
+  // Note: initial blur is already set in the HTML above — no applyBlur() needed.
+  setTimeout(() => {
+    document.addEventListener('keydown', onSpacebar);
+    timer = setTimeout(advance, CONFIG.FRAME_DURATION_MS);
+  }, 0);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   6. TRIAL RUNNER — iterates through all stimuli for one task block
+   ═══════════════════════════════════════════════════════════════ */
+function runTrialBlock(direction, taskType, onBlockDone) {
+  const stimuli = shuffleArray(STIMULI);
+  let i = 0;
+  const next = () => {
+    if (i >= stimuli.length) { onBlockDone(); return; }
+    runBlurTrial(stimuli[i], direction, taskType, i + 1, stimuli.length, (data) => {
+      allData.push(data);
+      i++;
+      next();
+    });
+  };
+  next();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   7. SCREEN HELPERS
+   ═══════════════════════════════════════════════════════════════ */
+/** Show an instruction screen and call onContinue when spacebar is pressed. */
+function showInstructions(html, onContinue) {
+  main.innerHTML = html;
+  const handler = e => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      document.removeEventListener('keydown', handler);
+      onContinue();
+    }
+  };
+  document.addEventListener('keydown', handler);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   8. INSTRUCTION HTML  (verbatim from Luhrmann et al. 2013)
+   ═══════════════════════════════════════════════════════════════ */
+const FADE_IN_INSTRUCTIONS = `
+  <div class="inst">
+    <h2>Welcome to the Fade In Task</h2>
+    <p>During this task, you will be shown a series of blurry images/words.
+       These images/words will become increasingly clear so that eventually
+       you will be able to identify what you are seeing. You will have to
+       indicate at what point you are able to identify the image/word that
+       is being shown.</p>
+    <p>On the following screens, you will view a series of 20 images/words
+       shown one at a time. Once you know what the image/word is, press the
+       <kbd>spacebar</kbd>. You will then see a space to enter text. Please
+       type in the image/word that you have just seen. Finally, hit the
+       <kbd>Enter</kbd> key or click <strong>Continue</strong> to proceed
+       to the next picture.</p>
+    <p class="start-cue">Press <kbd>spacebar</kbd> to begin.</p>
+  </div>`;
+
+const FADE_OUT_INSTRUCTIONS = `
+  <div class="inst">
+    <h2>Welcome to the Fade Out Task</h2>
+    <p>This task is similar to the Fade In task you just completed.
+       However, during this task, you will be shown a series of images/words
+       that will become increasingly blurry so that eventually you will no
+       longer be able to identify what you are seeing. You will have to
+       indicate at what point you are no longer able to see the image/word
+       that is being shown.</p>
+    <p>On the following screens, you will view a series of 20 images/words
+       shown one at a time. Once you no longer see the image/word, press the
+       <kbd>spacebar</kbd>. You will then see a transitional screen. This is
+       just to give you a chance to rest before viewing the next image. Once
+       you are ready to view the next image, hit the <kbd>spacebar</kbd> or
+       click <strong>Continue</strong> to proceed.</p>
+    <p class="start-cue">Press <kbd>spacebar</kbd> to begin.</p>
+  </div>`;
+
+/* ═══════════════════════════════════════════════════════════════
+   9. EXPERIMENT FLOW
+   ═══════════════════════════════════════════════════════════════ */
+function startExperiment(pid) {
+  participantId = pid;
+  sessionStart  = new Date().toISOString();
+
+  document.getElementById('pre-experiment').style.display = 'none';
+  main.style.display = 'block';
+
+  showInstructions(FADE_IN_INSTRUCTIONS, () => {
+    runTrialBlock('in', 'fade_in', () => {
+
+      // ── Break between tasks ───────────────────────────────
+      main.innerHTML = `
+        <div class="break-screen">
+          <h2>Part 1 Complete</h2>
+          <p>You have finished the Fade In task.<br>You may take a short break.</p>
+          <p style="margin-top:24px;">
+            When you are ready, press <kbd>spacebar</kbd> to continue to Part 2.
+          </p>
+        </div>`;
+
+      const breakHandler = e => {
+        if (e.code === 'Space') {
+          e.preventDefault();
+          document.removeEventListener('keydown', breakHandler);
+          showInstructions(FADE_OUT_INSTRUCTIONS, () => {
+            runTrialBlock('out', 'fade_out', showEndScreen);
+          });
+        }
+      };
+      document.addEventListener('keydown', breakHandler);
+    });
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   10. END SCREEN + DATA EXPORT
+   ═══════════════════════════════════════════════════════════════ */
+function showEndScreen() {
+  if (CONFIG.DEBUG_MODE) {
+    // Show raw CSV in the page for inspection
+    const csv = toCSV(allData);
+    main.innerHTML = `
+      <div style="padding:24px;">
+        <h2 style="margin-bottom:12px;">Debug — Raw Data</h2>
+        <pre style="font-size:11px; overflow:auto; background:#f8f8f8;
+                    border:1px solid #ddd; padding:12px; max-height:80vh;">${
+          csv.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        }</pre>
+      </div>`;
+  } else {
+    downloadCSV(allData, `fade_task_${participantId}_${Date.now()}.csv`);
+    main.innerHTML = `
+      <div style="display:flex; justify-content:center; align-items:center; min-height:100vh;
+                  font-family:'Lato',Arial,sans-serif;">
+        <div style="text-align:center; padding:60px;">
+          <h2 style="font-size:26px; margin-bottom:16px;">Task Complete</h2>
+          <p style="font-size:17px; color:#555; line-height:1.7;">
+            Thank you for your participation.<br>
+            Please let the experimenter know you have finished.
+          </p>
+        </div>
+      </div>`;
+  }
+}
+
+function toCSV(data) {
+  if (!data.length) return '';
+  const headers = Object.keys(data[0]);
+  const esc = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"'
+      : s;
+  };
+  return [
+    headers.join(','),
+    ...data.map(row => headers.map(h => esc(row[h])).join(','))
+  ].join('\n');
+}
+
+function downloadCSV(data, filename) {
+  const blob = new Blob([toCSV(data)], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   11. LAUNCH
+   ═══════════════════════════════════════════════════════════════ */
+const pidInput = document.getElementById('pid-input');
+const startBtn = document.getElementById('start-btn');
+
+const launch = () => {
+  const pid = pidInput.value.trim();
+  if (!pid) { pidInput.classList.add('error'); pidInput.focus(); return; }
+  startExperiment(pid);
+};
+
+startBtn.addEventListener('click', launch);
+pidInput.addEventListener('keydown', e => { if (e.key === 'Enter') launch(); });
+pidInput.addEventListener('input',   ()  => pidInput.classList.remove('error'));
+</script>
+</body>
+</html>
