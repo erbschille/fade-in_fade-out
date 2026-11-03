@@ -167,6 +167,15 @@ const CONFIG = {
   REQUIRE_RESPONSE: true,
 };
 
+/* Qualtrics hand-off. When this page is shown inside a Qualtrics survey it is
+   opened as  .../index.html?pid=<id>&session=<1|2>&embedded=1
+   In that mode: no ID screen, no CSV download, no results screen - the data
+   is sent back to Qualtrics, which then moves on to the next question. */
+const _params  = new URLSearchParams(window.location.search);
+const EMBEDDED = _params.get('embedded') === '1';
+const URL_PID  = (_params.get('pid') || '').trim();
+const SESSION  = (_params.get('session') || '').trim();   // 1 = pre-training, 2 = post-training
+
 /* ═══════════════════════════════════════════════════════════════
    2. STIMULI
    10 words + 10 image placeholders = 20 total.
@@ -328,6 +337,7 @@ function runBlurTrial(stimulus, direction, taskType, trialNum, taskTotal, onComp
 
     onComplete({
       participant_id:          participantId,
+      session:                 SESSION,
       session_start:           sessionStart,
       stimulus_id:             stimulus.id,
       stimulus_type:           stimulus.type,
@@ -550,7 +560,30 @@ function startExperiment(pid) {
 /* ═══════════════════════════════════════════════════════════════
    10. END SCREEN + DATA EXPORT
    ═══════════════════════════════════════════════════════════════ */
+/* Compact copy of all 40 trials for Qualtrics: one record per trial, in the order
+   shown (the fade-in trials first, then the fade-out trials), records separated
+   by ";" and fields by "|":
+        stimulus_id | direction (in/out) | frame_at_response | rt_ms | response_text
+   Clarity %, blur px, trial number etc. can all be recomputed from these. */
+function packTrials(data) {
+  const clean = v => String(v === null || v === undefined ? '' : v).replace(/[|;\r\n]+/g, ' ').trim();
+  return data.map(r => [r.stimulus_id, r.direction, r.frame_at_response, r.rt_ms, clean(r.response_text)].join('|')).join(';');
+}
+
+let _sent = false;
+function sendToParent(data) {
+  if (_sent || window.parent === window) return;
+  _sent = true;
+  window.parent.postMessage({ type: 'task_complete', task: 'fadeinout', data: { trials: packTrials(data) } }, '*');
+}
+
 function showEndScreen() {
+  if (EMBEDDED) {
+    sendToParent(allData);
+    main.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;min-height:100vh;' +
+                     'font-family:Lato,Arial,sans-serif;color:#888;font-size:15px;">Saving your responses&hellip;</div>';
+    return;
+  }
   if (CONFIG.DEBUG_MODE) {
     // Show raw CSV in the page for inspection
     const csv = toCSV(allData);
@@ -617,6 +650,10 @@ const launch = () => {
 };
 
 startBtn.addEventListener('click', launch);
+if (EMBEDDED || URL_PID) {            // inside Qualtrics: never show the manual ID screen
+  window.focus();
+  startExperiment(URL_PID || 'unknown');
+}
 pidInput.addEventListener('keydown', e => { if (e.key === 'Enter') launch(); });
 pidInput.addEventListener('input',   ()  => pidInput.classList.remove('error'));
 </script>
