@@ -77,9 +77,10 @@
     /* padding must be ≥ the blur radius; at MAX 50 px, blur bleeds ~100 px   */
     .stim-clip { overflow: hidden; padding: 100px; }
 
-    /* Smooth blur transitions — duration slightly under frame interval so each
-       step flows into the next without a visible snap.                        */
-    #blur-target { transition: filter 450ms linear; display: inline-block; }
+    /* No CSS transition — blur is driven continuously by requestAnimationFrame
+       (~60 Hz updates based on elapsed time), which avoids the pulsing that a
+       stepped setTimeout+transition approach produces.                        */
+    #blur-target { display: inline-block; }
 
     .stim-word {
       font-family: 'Courier Prime', 'Courier New', monospace;
@@ -291,17 +292,45 @@ const dbg         = document.getElementById('dbg');
  */
 function runBlurTrial(stimulus, direction, taskType, trialNum, taskTotal, onComplete) {
 
-  let frame           = 0;
-  let timer           = null;
+  // Animation state. Blur is a continuous function of elapsed time (driven by
+  // requestAnimationFrame). `frame` is tracked only for data-recording compatibility
+  // with the original schema — it's the discrete frame index (0 … NUM_FRAMES-1)
+  // that elapsed time currently falls into.
+  let rafId           = null;
   let sequenceStopped = false;
+  let animationStart  = 0;
+  let frame           = 0;
   const t0            = performance.now();
 
-  const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+  // Total visible transition: from frame 0 to frame NUM_FRAMES-1 takes
+  // (NUM_FRAMES-1) × FRAME_DURATION_MS (= 20 000 ms with defaults). The final
+  // frame value is then held for one more FRAME_DURATION_MS before auto-advance,
+  // matching the original behaviour.
+  const transitionDuration = (CONFIG.NUM_FRAMES - 1) * CONFIG.FRAME_DURATION_MS;
+  const totalDuration      = CONFIG.NUM_FRAMES       * CONFIG.FRAME_DURATION_MS;
+
+  const stopAnimation = () => { if (rafId) { cancelAnimationFrame(rafId); rafId = null; } };
+
+  // ── Continuous blur curve (time-based, not stepped) ───────────
+  // Same quadratic shape as blurForFrame(), but takes a continuous elapsed-time
+  // input so animation is perfectly smooth. At elapsed=0 we get the frame-0 blur;
+  // at elapsed >= transitionDuration we get the frame-(NUM_FRAMES-1) blur.
+  const blurAtTime = (elapsedMs) => {
+    const max = stimulus.type === 'word' ? CONFIG.MAX_BLUR_WORD_PX : CONFIG.MAX_BLUR_IMAGE_PX;
+    const t   = Math.min(1, Math.max(0, elapsedMs / transitionDuration));
+    const curve = direction === 'in' ? Math.pow(1 - t, 2) : Math.pow(t, 2);
+    return max * curve;
+  };
+
+  // Discrete frame index for the given elapsed time (for CSV compatibility).
+  const frameAtTime = (elapsedMs) =>
+    Math.min(CONFIG.NUM_FRAMES - 1,
+             Math.max(0, Math.floor(elapsedMs / CONFIG.FRAME_DURATION_MS)));
 
   // ── Build the trial DOM once ──────────────────────────────────
   // The initial blur is set as an inline style on #blur-target so the
   // element is already blurred on its very first paint — no unblurred flash.
-  const initialBlurPx = blurForFrame(0, direction, stimulus.type);
+  const initialBlurPx = blurAtTime(0);
 
   const prompt = direction === 'in'
     ? `Press <kbd>spacebar</kbd> when you can identify the image&thinsp;/&thinsp;word.`
@@ -318,20 +347,32 @@ function runBlurTrial(stimulus, direction, taskType, trialNum, taskTotal, onComp
 
   const blurTarget = document.getElementById('blur-target');
 
-  // ── Update only the CSS filter — no DOM rebuilding ────────────
-  const applyBlur = () => {
-    const px = blurForFrame(frame, direction, stimulus.type);
+  // ── requestAnimationFrame tick: update blur continuously ──────
+  const tick = (now) => {
+    if (sequenceStopped) return;
+    const elapsed = now - animationStart;
+    const px      = blurAtTime(elapsed);
+    frame         = frameAtTime(elapsed);
     blurTarget.style.filter = `blur(${px.toFixed(2)}px)`;
+
     if (CONFIG.DEBUG_MODE) {
       dbg.textContent =
         `frame ${frame + 1}/${CONFIG.NUM_FRAMES}  ·  ` +
         `blur ${px.toFixed(1)} px  ·  clarity ${clarityPct(frame, direction).toFixed(0)} %`;
     }
+
+    if (elapsed >= totalDuration) {
+      // All frames exhausted — auto-proceed without spacebar
+      sequenceStopped = true;
+      direction === 'in' ? showTextEntry() : showRestScreen();
+      return;
+    }
+    rafId = requestAnimationFrame(tick);
   };
 
   // ── Collect trial data and call onComplete ────────────────────
   const completeTrial = (responseText) => {
-    stopTimer();
+    stopAnimation();
     document.removeEventListener('keydown', onSpacebar);
     if (CONFIG.DEBUG_MODE) dbg.textContent = '';
 
@@ -415,26 +456,12 @@ function runBlurTrial(stimulus, direction, taskType, trialNum, taskTotal, onComp
     document.addEventListener('keydown', onRestSpace);
   };
 
-  // ── Advance frames automatically ──────────────────────────────
-  const advance = () => {
-    if (sequenceStopped) return;
-    if (frame >= CONFIG.NUM_FRAMES - 1) {
-      // All 41 frames exhausted — auto-proceed without spacebar
-      sequenceStopped = true;
-      direction === 'in' ? showTextEntry() : showRestScreen();
-      return;
-    }
-    frame++;
-    applyBlur();
-    timer = setTimeout(advance, CONFIG.FRAME_DURATION_MS);
-  };
-
   // ── Spacebar: participant response ────────────────────────────
   const onSpacebar = e => {
     if (e.code === 'Space' && !sequenceStopped) {
       e.preventDefault();
       sequenceStopped = true;
-      stopTimer();
+      stopAnimation();
       direction === 'in' ? showTextEntry() : showRestScreen();
     }
   };
@@ -442,10 +469,12 @@ function runBlurTrial(stimulus, direction, taskType, trialNum, taskTotal, onComp
   // ── Deferred start ────────────────────────────────────────────
   // Wrapped in setTimeout(…, 0) so the spacebar that advanced the previous
   // screen cannot leak into onSpacebar here.
-  // Note: initial blur is already set in the HTML above — no applyBlur() needed.
+  // Note: initial blur is already set in the HTML above — the RAF loop takes
+  // over from there and updates blur continuously based on elapsed time.
   setTimeout(() => {
     document.addEventListener('keydown', onSpacebar);
-    timer = setTimeout(advance, CONFIG.FRAME_DURATION_MS);
+    animationStart = performance.now();
+    rafId = requestAnimationFrame(tick);
   }, 0);
 }
 
